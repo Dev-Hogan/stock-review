@@ -282,8 +282,34 @@ class StockFetcher:
         return 0
 
     def fetch_realtime_quote(self, stock_code: str) -> Optional[Dict]:
-        """获取实时行情"""
+        """获取实时行情（优先 baostock）"""
         logger.info(f"Fetching realtime quote for {stock_code}")
+
+        try:
+            info = self._bao.fetch_stock_info(stock_code)
+            if info:
+                klines = self._bao.fetch_daily_klines(stock_code, 
+                    start_date=(date.today() - timedelta(days=1)).strftime('%Y-%m-%d'),
+                    end_date=date.today().strftime('%Y-%m-%d'))
+                if klines:
+                    latest = klines[-1]
+                    prev = klines[-2] if len(klines) > 1 else latest
+                    change = latest['close'] - prev['close']
+                    change_percent = (change / prev['close'] * 100) if prev['close'] else 0
+                    return {
+                        "code": stock_code,
+                        "name": info.get('name', ''),
+                        "open": latest['open'],
+                        "high": latest['high'],
+                        "low": latest['low'],
+                        "close": latest['close'],
+                        "volume": latest['volume'],
+                        "amount": latest['amount'],
+                        "price_change": change,
+                        "change_percent": change_percent
+                    }
+        except Exception as e:
+            logger.warning(f"BaoStock failed for realtime quote: {e}")
 
         def _fetch():
             df = ak.stock_zh_a_spot_em()

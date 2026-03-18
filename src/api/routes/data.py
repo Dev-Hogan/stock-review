@@ -76,10 +76,10 @@ async def search_stocks(
     stocks = db.search_stocks(keyword, limit)
     return [
         StockInfoResponse(
-            code=s.code,
-            name=s.name,
-            industry=s.industry,
-            market_cap=s.market_cap
+            code=s["code"],
+            name=s["name"],
+            industry=s.get("industry"),
+            market_cap=s.get("market_cap")
         )
         for s in stocks
     ]
@@ -157,14 +157,14 @@ async def get_daily_klines(
 
     return [
         DailyKlineResponse(
-            stock_code=k.stock_code,
-            date=k.date.isoformat(),
-            open=float(k.open),
-            high=float(k.high),
-            low=float(k.low),
-            close=float(k.close),
-            volume=k.volume,
-            amount=k.amount
+            stock_code=k["stock_code"],
+            date=k["date"].isoformat() if hasattr(k["date"], 'isoformat') else str(k["date"]),
+            open=float(k["open"]),
+            high=float(k["high"]),
+            low=float(k["low"]),
+            close=float(k["close"]),
+            volume=k["volume"],
+            amount=k["amount"]
         )
         for k in db_klines
     ]

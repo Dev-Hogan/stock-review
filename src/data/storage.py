@@ -101,7 +101,7 @@ class Database:
         with self.get_session() as session:
             return session.query(Stock).order_by(Stock.code).all()
 
-    def search_stocks(self, keyword: str, limit: int = 20) -> List[Stock]:
+    def search_stocks(self, keyword: str, limit: int = 20) -> List[dict]:
         """搜索股票"""
         with self.get_session() as session:
             query = session.query(Stock)
@@ -111,7 +111,11 @@ class Database:
                     (Stock.code.like(keyword_pattern)) |
                     (Stock.name.like(keyword_pattern))
                 )
-            return query.limit(limit).all()
+            stocks = query.limit(limit).all()
+            return [
+                {"code": s.code, "name": s.name, "industry": s.industry, "market_cap": s.market_cap}
+                for s in stocks
+            ]
 
     def save_daily_klines(self, klines: List[dict]) -> int:
         """批量保存日 K 线数据"""
@@ -150,7 +154,7 @@ class Database:
         start_date: date = None,
         end_date: date = None,
         limit: int = None
-    ) -> List[DailyKline]:
+    ) -> List[dict]:
         """获取日 K 线数据"""
         with self.get_session() as session:
             query = session.query(DailyKline).filter(DailyKline.stock_code == stock_code)
@@ -165,7 +169,20 @@ class Database:
             if limit:
                 query = query.limit(limit)
 
-            return query.all()
+            klines = query.all()
+            return [
+                {
+                    "stock_code": k.stock_code,
+                    "date": k.date,
+                    "open": float(k.open),
+                    "high": float(k.high),
+                    "low": float(k.low),
+                    "close": float(k.close),
+                    "volume": k.volume,
+                    "amount": k.amount
+                }
+                for k in klines
+            ]
 
     def save_minute_klines(self, klines: List[dict]) -> int:
         """批量保存分钟 K 线数据"""

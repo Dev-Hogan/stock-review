@@ -224,28 +224,40 @@ async function loadKlineData() {
 
   if (currentPeriod.value === 'daily') {
     const res = await stockApi.getDailyKlines(code, { limit: 250 })
-    klineData = res.data.map(k => ({
-      time: k.date.replace(/-/g, '') as any,
-      open: k.open,
-      high: k.high,
-      low: k.low,
-      close: k.close
-    }))
+    klineData = res.data
+      .map(k => ({
+        time: k.date as any,
+        open: k.open,
+        high: k.high,
+        low: k.low,
+        close: k.close
+      }))
+      .sort((a, b) => a.time.localeCompare(b.time))
   } else {
     const res = await stockApi.getMinuteKlines(code, { period: currentPeriod.value })
-    klineData = res.data.map(k => ({
-      time: k.datetime.replace('T', ' ').slice(0, 16) as any,
-      open: k.open,
-      high: k.high,
-      low: k.low,
-      close: k.close
-    }))
+    klineData = res.data
+      .map(k => ({
+        time: k.datetime.replace('T', ' ').slice(0, 16) as any,
+        open: k.open,
+        high: k.high,
+        low: k.low,
+        close: k.close
+      }))
+      .sort((a, b) => a.time.localeCompare(b.time))
   }
 
-  chart.remove()
+  if (chart) {
+    chart.remove()
+    chart = null
+  }
+  if (!chartRef.value) return
+
+  const containerWidth = chartRef.value.clientWidth || 800
+  const containerHeight = chartRef.value.clientHeight || 500
+
   chart = createChart(chartRef.value, {
-    width: chartRef.value.clientWidth,
-    height: 400,
+    width: containerWidth,
+    height: containerHeight,
     layout: {
       background: { color: '#ffffff' },
       textColor: '#333333'
@@ -453,12 +465,16 @@ function formatAmount(a: number | undefined) {
 
 .chart-container {
   flex: 1;
-  min-height: 300px;
+  min-height: 500px;
+  height: 500px;
+  display: flex;
+  flex-direction: column;
 }
 
 .kline-chart {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 500px;
 }
 
 .chart-controls {

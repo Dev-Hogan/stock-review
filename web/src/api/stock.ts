@@ -50,6 +50,13 @@ export interface RealtimeQuote {
   change_percent: number
 }
 
+export interface WatchlistItem {
+  code: string
+  name: string
+  industry?: string
+  market_cap?: number
+}
+
 export const stockApi = {
   search(keyword: string, limit = 20) {
     return api.get<StockInfo[]>('/data/stocks/search', { params: { keyword, limit } })
@@ -77,5 +84,23 @@ export const stockApi = {
 
   updateStock(code: string, includeMinute = true) {
     return api.post(`/data/stocks/${code}/update`, null, { params: { include_minute: includeMinute } })
+  }
+}
+
+export const watchlistApi = {
+  getAll(category?: string) {
+    return api.get<WatchlistItem[]>('/watchlist/', { params: { category } })
+  },
+
+  add(code: string, category = '默认') {
+    return api.post<WatchlistItem>('/watchlist/', { code, category })
+  },
+
+  remove(code: string) {
+    return api.delete(`/watchlist/${code}`)
+  },
+
+  updateCategory(code: string, category: string) {
+    return api.put('/watchlist/category', { code, category })
   }
 }

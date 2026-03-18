@@ -69,6 +69,17 @@
         <div class="panel-section">
           <h3>实时行情</h3>
           <div v-if="selectedStock" class="quote-details">
+            <div class="quote-row header-row">
+              <span class="stock-name-lg">{{ selectedStock.name }}</span>
+              <span class="stock-code-sm">{{ selectedStock.code }}</span>
+            </div>
+            <div class="quote-row price-row">
+              <span class="price-lg">{{ selectedStock.close?.toFixed(2) }}</span>
+              <span :class="['change-lg', (selectedStock.change_percent || 0) >= 0 ? 'up' : 'down']">
+                {{ (selectedStock.change_percent || 0) >= 0 ? '+' : '' }}{{ selectedStock.change_percent?.toFixed(2) }}%
+              </span>
+            </div>
+            <div class="divider"></div>
             <div class="quote-row">
               <span>开盘</span>
               <span>{{ selectedStock.open?.toFixed(2) }}</span>
@@ -89,6 +100,17 @@
               <span>成交额</span>
               <span>{{ formatAmount(selectedStock.amount) }}</span>
             </div>
+            <div class="quote-row">
+              <span>行业</span>
+              <span>{{ selectedStock.industry || '-' }}</span>
+            </div>
+            <div class="quote-row">
+              <span>市值</span>
+              <span>{{ formatAmount(selectedStock.market_cap) }}</span>
+            </div>
+          </div>
+          <div v-else class="quote-empty">
+            选择股票查看详情
           </div>
         </div>
       </aside>
@@ -179,15 +201,30 @@ function initChart() {
   })
 }
 
+function calculateMA(data: any[], period: number): { time: any; value: number }[] {
+  const result: { time: any; value: number }[] = []
+  for (let i = period - 1; i < data.length; i++) {
+    let sum = 0
+    for (let j = 0; j < period; j++) {
+      sum += data[i - j].close
+    }
+    result.push({
+      time: data[i].time,
+      value: parseFloat((sum / period).toFixed(2))
+    })
+  }
+  return result
+}
+
 async function loadKlineData() {
-  if (!selectedStock.value || !chart) return
+  if (!selectedStock.value || !chartRef.value) return
 
   const code = selectedStock.value.code
-  let data
+  let klineData: any[] = []
 
   if (currentPeriod.value === 'daily') {
-    const res = await stockApi.getDailyKlines(code, { limit: 100 })
-    data = res.data.map(k => ({
+    const res = await stockApi.getDailyKlines(code, { limit: 250 })
+    klineData = res.data.map(k => ({
       time: k.date.replace(/-/g, '') as any,
       open: k.open,
       high: k.high,
@@ -196,7 +233,7 @@ async function loadKlineData() {
     }))
   } else {
     const res = await stockApi.getMinuteKlines(code, { period: currentPeriod.value })
-    data = res.data.map(k => ({
+    klineData = res.data.map(k => ({
       time: k.datetime.replace('T', ' ').slice(0, 16) as any,
       open: k.open,
       high: k.high,
@@ -206,13 +243,54 @@ async function loadKlineData() {
   }
 
   chart.remove()
-  chart = createChart(chartRef.value!, {
-    width: chartRef.value!.clientWidth,
-    height: 400
+  chart = createChart(chartRef.value, {
+    width: chartRef.value.clientWidth,
+    height: 400,
+    layout: {
+      background: { color: '#ffffff' },
+      textColor: '#333333'
+    },
+    grid: {
+      vertLines: { color: '#f0f0f0' },
+      horzLines: { color: '#f0f0f0' }
+    },
+    timeScale: {
+      borderColor: '#e0e0e0'
+    }
   })
 
-  const series = chart.addCandlestickSeries()
-  series.setData(data)
+  const candlestickSeries = chart.addCandlestickSeries({
+    upColor: '#ef5350',
+    downColor: '#26a69a',
+    borderUpColor: '#ef5350',
+    borderDownColor: '#26a69a',
+    wickUpColor: '#ef5350',
+    wickDownColor: '#26a69a'
+  })
+  candlestickSeries.setData(klineData)
+
+  const ma5 = calculateMA(klineData, 5)
+  const ma10 = calculateMA(klineData, 10)
+  const ma20 = calculateMA(klineData, 20)
+
+  chart.addLineSeries({
+    color: '#2196f3',
+    lineWidth: 1,
+    title: 'MA5'
+  }).setData(ma5)
+
+  chart.addLineSeries({
+    color: '#ff9800',
+    lineWidth: 1,
+    title: 'MA10'
+  }).setData(ma10)
+
+  chart.addLineSeries({
+    color: '#9c27b0',
+    lineWidth: 1,
+    title: 'MA20'
+  }).setData(ma20)
+
   chart.timeScale().fitContent()
 }
 
@@ -444,6 +522,57 @@ function formatAmount(a: number | undefined) {
 
 .quote-row .down {
   color: #67c23a;
+}
+
+.quote-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+}
+
+.header-row {
+  flex-direction: column;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.stock-name-lg {
+  font-size: 18px;
+  font-weight: bold;
+}
+
+.stock-code-sm {
+  font-size: 12px;
+  color: #999;
+}
+
+.price-row {
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.price-lg {
+  font-size: 28px;
+  font-weight: bold;
+  margin-right: 8px;
+}
+
+.change-lg {
+  font-size: 16px;
+}
+
+.change-lg.up {
+  color: #f56c6c;
+}
+
+.change-lg.down {
+  color: #67c23a;
+}
+
+.divider {
+  height: 1px;
+  background: #eee;
+  margin: 8px 0;
 }
 
 .msg-bar {

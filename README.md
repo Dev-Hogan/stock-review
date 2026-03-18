@@ -11,6 +11,7 @@
 - 🎯 **多股同步**：支持多只股票同时回放，时间轴同步控制
 - 🖥️ **Web 界面**：Vue 3 + FastAPI 现代化 Web 应用
 - 📉 **专业图表**：Lightweight Charts (TradingView) 专业 K 线图表
+- 🔄 **双数据源**：支持 baostock（主）和 akshare（备）
 
 ## 快速开始
 
@@ -24,7 +25,7 @@
 
 **后端依赖：**
 ```bash
-pip install fastapi uvicorn pydantic pydantic-settings sqlalchemy akshare python-multipart python-dotenv aiohttp click
+pip install fastapi uvicorn pydantic pydantic-settings sqlalchemy akshare baostock python-multipart python-dotenv aiohttp click
 ```
 
 **前端依赖：**
@@ -72,10 +73,11 @@ bash start-dev.sh
 通过自然语言描述筛选条件，大模型自动生成因子代码并执行筛选。
 
 ### 交易看板
-- 自选股管理（添加/删除/分类）
-- 个股 K 线图表（日 K/分钟 K 切换）
-- 实时行情数据
-- 技术指标叠加（MA、VWAP 等）
+- ✅ 自选股管理（添加/删除/分类）
+- ✅ 个股 K 线图表（日 K/分钟 K 切换）
+- ✅ 实时行情数据
+- ✅ 技术指标叠加（MA5/MA10/MA20）
+- 🔄 买卖五档（待接入实时数据源）
 
 ### 盘口回放
 - 选择历史日期进行回放
@@ -96,7 +98,8 @@ bash start-dev.sh
 **后端:**
 - FastAPI - Web 框架
 - SQLAlchemy - 数据库 ORM
-- AkShare - 数据获取
+- baostock - 主数据源（无需代理）
+- akshare - 备用数据源
 - SQLite - 数据存储
 
 **前端:**
@@ -104,6 +107,7 @@ bash start-dev.sh
 - Vite - 构建工具
 - Pinia - 状态管理
 - Vue Router - 路由
+- Naive UI - UI 组件库
 - Lightweight Charts - 图表库
 
 ## 项目结构
@@ -113,11 +117,16 @@ stock-review/
 ├── src/
 │   ├── api/           # API 层
 │   │   ├── app.py     # FastAPI 应用
-│   │   ├── routes/    # 路由
-│   │   └── schemas/   # Pydantic 模型
+│   │   └── routes/    # 路由
+│   │       ├── data.py      # 数据查询接口
+│   │       ├── watchlist.py # 自选股接口
+│   │       ├── config.py    # 配置接口
+│   │       └── llm.py       # 大模型接口
 │   ├── data/          # 数据层
-│   │   ├── fetcher.py # akshare 数据获取
+│   │   ├── fetcher.py # 数据获取（baostock/akshare）
+│   │   ├── baostock.py # baostock 数据获取
 │   │   ├── storage.py # SQLite 存储
+│   │   ├── cache.py   # 内存缓存
 │   │   └── models.py  # 数据模型
 │   ├── strategies/    # 策略层
 │   │   ├── generator.py # 因子代码生成
@@ -128,12 +137,19 @@ stock-review/
 ├── web/               # Web 前端
 │   ├── src/
 │   │   ├── api/       # API 调用
-│   │   ├── components/# 组件
+│   │   │   └── stock.ts # 股票 API
+│   │   ├── components/ # 组件
+│   │   │   ├── StockSearch.vue  # 股票搜索
+│   │   │   └── WatchList.vue     # 自选股列表
 │   │   ├── stores/    # 状态管理
+│   │   │   └── stock.ts
 │   │   ├── views/     # 页面
+│   │   │   └── TradingView.vue   # 交易看板
 │   │   └── router/    # 路由
 │   ├── package.json
 │   └── vite.config.ts
+├── scripts/
+│   └── update_data.py # 盘后批量更新脚本
 ├── configs/           # 配置文件
 ├── data/              # 数据存储
 ├── pyproject.toml
@@ -142,6 +158,18 @@ stock-review/
 └── README.md
 ```
 
+## 数据源
+
+### baostock（主数据源）
+- 优点：无需代理，直接访问
+- 数据：日 K 线、分钟 K 线、股票列表
+- 适用场景：日常使用
+
+### akshare（备用数据源）
+- 优点：数据更全面
+- 缺点：需要代理访问
+- 适用场景：baostock 不可用时 fallback
+
 ## 开发计划
 
 详见 [PLAN.md](./PLAN.md) 和 [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)
@@ -149,15 +177,17 @@ stock-review/
 ### 当前进度
 
 - ✅ 阶段 1: 基础架构（FastAPI + Vue 3）
-- ⏳ 阶段 2: 数据层（akshare 数据获取）
-- ⏸️ 阶段 3: API 接口
-- ⏸️ 阶段 4: 交易看板
-- ⏸️ 阶段 5: 盘口回放
+- ✅ 阶段 2: 数据层（baostock + akshare 双数据源）
+- ✅ 阶段 3: API 接口（数据查询、自选股管理）
+- ✅ 阶段 4: 交易看板（K线图表、MA指标、实时行情）
+- ⏳ 阶段 5: 盘口回放
+- ⏸️ 阶段 6-10: 待开发
 
 ## 注意事项
 
-1. **数据源限制**：akshare 不支持历史逐笔成交和五档行情数据，当前使用分钟级 K 线数据模拟回放
-2. **未来扩展**：可接入 Tushare 等数据源实现秒级精度回放
+1. **首次使用**：需要点击「刷新列表」按钮获取股票数据
+2. **数据延迟**：baostock 数据可能有 1-2 天延迟
+3. **实时行情**：当前实时数据基于日 K 线计算，非真实盘口数据
 
 ## 许可证
 

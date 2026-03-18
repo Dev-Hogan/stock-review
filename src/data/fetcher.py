@@ -1,5 +1,6 @@
 """
-akshare 数据获取层
+股票数据获取层
+支持 baostock（主）和 akshare（备）
 """
 import logging
 from datetime import datetime, date, timedelta
@@ -12,6 +13,7 @@ import pandas as pd
 
 from .storage import Database
 from .models import StockInfo
+from .baostock import BaoStockFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -24,24 +26,24 @@ class StockFetcher:
 
     def __init__(self, db: Database = None):
         self.db = db or Database()
+        self._bao = BaoStockFetcher()
 
-    def _retry_call(self, func, *args, **kwargs) -> Any:
-        """带重试的函数调用"""
-        last_error = None
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Attempt {attempt + 1} failed: {e}")
-                if attempt < self.MAX_RETRIES - 1:
-                    time.sleep(self.RETRY_DELAY)
-        logger.error(f"All {self.MAX_RETRIES} attempts failed")
-        raise last_error
+    def _try_bao(self, func, *args, **kwargs):
+        """尝试使用 baostock"""
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.warning(f"BaoStock failed: {e}, trying akshare...")
+            raise
 
     def fetch_stock_list(self) -> List[Dict]:
         """获取 A 股股票列表"""
         logger.info("Fetching A-share stock list...")
+
+        try:
+            return self._bao.fetch_stock_list()
+        except Exception as e:
+            logger.warning(f"BaoStock failed: {e}, falling back to akshare...")
 
         def _fetch():
             df = ak.stock_zh_a_spot_em()
@@ -80,6 +82,13 @@ class StockFetcher:
     def fetch_stock_info(self, stock_code: str) -> Optional[StockInfo]:
         """获取股票基本信息"""
         logger.info(f"Fetching info for stock {stock_code}")
+
+        try:
+            info = self._bao.fetch_stock_info(stock_code)
+            if info:
+                return StockInfo(**info)
+        except Exception as e:
+            logger.warning(f"BaoStock failed for {stock_code}: {e}")
 
         def _fetch():
             df = ak.stock_individual_info_em(symbol=stock_code)
@@ -123,6 +132,11 @@ class StockFetcher:
     ) -> List[Dict]:
         """获取日 K 线数据"""
         logger.info(f"Fetching daily klines for {stock_code}")
+
+        try:
+            return self._bao.fetch_daily_klines(stock_code, start_date, end_date, adjust)
+        except Exception as e:
+            logger.warning(f"BaoStock failed for daily klines: {e}")
 
         if end_date is None:
             end_date = date.today().strftime("%Y%m%d")
@@ -192,6 +206,11 @@ class StockFetcher:
             adjust: 复权类型 ("qfq", "hfq", "")
         """
         logger.info(f"Fetching {period}min klines for {stock_code}")
+
+        try:
+            return self._bao.fetch_minute_klines(stock_code, start_date, end_date, period)
+        except Exception as e:
+            logger.warning(f"BaoStock failed for minute klines: {e}")
 
         if end_date is None:
             end_date = date.today().strftime("%Y%m%d")

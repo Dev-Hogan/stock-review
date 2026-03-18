@@ -8,11 +8,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.4.0",
-    "vue-router": "^4.2.5",
-    "pinia": "^2.1.7",
     "axios": "^1.6.2",
-    "lightweight-charts": "^4.1.0"
+    "lightweight-charts": "^4.1.0",
+    "naive-ui": "^2.44.1",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

@@ -3,7 +3,7 @@ FastAPI 应用主入口
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.api.routes import config, llm
+from src.api.routes import config, llm, data
 
 app = FastAPI(
     title="Stock Review API",
@@ -23,6 +23,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(config.router, prefix="/api")
 app.include_router(llm.router, prefix="/api")
+app.include_router(data.router, prefix="/api")
 
 
 @app.get("/")

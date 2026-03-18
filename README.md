@@ -25,7 +25,14 @@
 
 **后端依赖：**
 ```bash
-pip install fastapi uvicorn pydantic pydantic-settings sqlalchemy akshare baostock python-multipart python-dotenv aiohttp click
+pip install poetry
+cd E:\Ai\stock-review
+poetry install
+```
+
+或使用 pip（依赖可能不全）：
+```bash
+pip install fastapi uvicorn pydantic pydantic-settings sqlalchemy akshare baostock python-multipart python-dotenv aiohttp click asyncio
 ```
 
 **前端依赖：**

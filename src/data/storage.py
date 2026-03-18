@@ -1,6 +1,7 @@
 """
 SQLite 数据库存储层
 """
+
 import os
 from datetime import datetime, date
 from typing import List, Optional, Tuple
@@ -35,7 +36,7 @@ class Database:
             db_path = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                 "data",
-                "stock_review.db"
+                "stock_review.db",
             )
 
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -70,8 +71,9 @@ class Database:
         """初始化数据库"""
         self._create_tables()
 
-    def save_stock(self, code: str, name: str, industry: str = None,
-                   market_cap: float = None) -> Stock:
+    def save_stock(
+        self, code: str, name: str, industry: str = None, market_cap: float = None
+    ) -> Stock:
         """保存股票基本信息"""
         with self.get_session() as session:
             stock = session.query(Stock).filter(Stock.code == code).first()
@@ -86,15 +88,23 @@ class Database:
                     name=name,
                     industry=industry,
                     market_cap=market_cap,
-                    updated_at=datetime.now()
+                    updated_at=datetime.now(),
                 )
                 session.add(stock)
             return stock
 
-    def get_stock(self, code: str) -> Optional[Stock]:
+    def get_stock(self, code: str) -> Optional[dict]:
         """获取股票基本信息"""
         with self.get_session() as session:
-            return session.query(Stock).filter(Stock.code == code).first()
+            stock = session.query(Stock).filter(Stock.code == code).first()
+            if stock:
+                return {
+                    "code": stock.code,
+                    "name": stock.name,
+                    "industry": stock.industry,
+                    "market_cap": stock.market_cap,
+                }
+            return None
 
     def get_all_stocks(self) -> List[Stock]:
         """获取所有股票"""
@@ -108,12 +118,17 @@ class Database:
             if keyword:
                 keyword_pattern = f"%{keyword}%"
                 query = query.filter(
-                    (Stock.code.like(keyword_pattern)) |
-                    (Stock.name.like(keyword_pattern))
+                    (Stock.code.like(keyword_pattern))
+                    | (Stock.name.like(keyword_pattern))
                 )
             stocks = query.limit(limit).all()
             return [
-                {"code": s.code, "name": s.name, "industry": s.industry, "market_cap": s.market_cap}
+                {
+                    "code": s.code,
+                    "name": s.name,
+                    "industry": s.industry,
+                    "market_cap": s.market_cap,
+                }
                 for s in stocks
             ]
 
@@ -128,12 +143,16 @@ class Database:
                 stock_code = kline_data["stock_code"]
                 kline_date = kline_data["date"]
 
-                existing = session.query(DailyKline).filter(
-                    and_(
-                        DailyKline.stock_code == stock_code,
-                        DailyKline.date == kline_date
+                existing = (
+                    session.query(DailyKline)
+                    .filter(
+                        and_(
+                            DailyKline.stock_code == stock_code,
+                            DailyKline.date == kline_date,
+                        )
                     )
-                ).first()
+                    .first()
+                )
 
                 if existing:
                     existing.open = kline_data["open"]
@@ -142,6 +161,7 @@ class Database:
                     existing.close = kline_data["close"]
                     existing.volume = kline_data["volume"]
                     existing.amount = kline_data["amount"]
+                    existing.turnover = kline_data.get("turnover")
                 else:
                     kline = DailyKline(**kline_data)
                     session.add(kline)
@@ -153,11 +173,13 @@ class Database:
         stock_code: str,
         start_date: date = None,
         end_date: date = None,
-        limit: int = None
+        limit: int = None,
     ) -> List[dict]:
         """获取日 K 线数据"""
         with self.get_session() as session:
-            query = session.query(DailyKline).filter(DailyKline.stock_code == stock_code)
+            query = session.query(DailyKline).filter(
+                DailyKline.stock_code == stock_code
+            )
 
             if start_date:
                 query = query.filter(DailyKline.date >= start_date)
@@ -179,7 +201,8 @@ class Database:
                     "low": float(k.low),
                     "close": float(k.close),
                     "volume": k.volume,
-                    "amount": k.amount
+                    "amount": k.amount,
+                    "turnover": float(k.turnover) if k.turnover else None,
                 }
                 for k in klines
             ]
@@ -195,12 +218,16 @@ class Database:
                 stock_code = kline_data["stock_code"]
                 kline_datetime = kline_data["datetime"]
 
-                existing = session.query(MinuteKline).filter(
-                    and_(
-                        MinuteKline.stock_code == stock_code,
-                        MinuteKline.datetime == kline_datetime
+                existing = (
+                    session.query(MinuteKline)
+                    .filter(
+                        and_(
+                            MinuteKline.stock_code == stock_code,
+                            MinuteKline.datetime == kline_datetime,
+                        )
                     )
-                ).first()
+                    .first()
+                )
 
                 if existing:
                     existing.open = kline_data["open"]
@@ -220,15 +247,21 @@ class Database:
         stock_code: str,
         date: date = None,
         start_datetime: datetime = None,
-        end_datetime: datetime = None
+        end_datetime: datetime = None,
     ) -> List[MinuteKline]:
         """获取分钟 K 线数据"""
         with self.get_session() as session:
-            query = session.query(MinuteKline).filter(MinuteKline.stock_code == stock_code)
+            query = session.query(MinuteKline).filter(
+                MinuteKline.stock_code == stock_code
+            )
 
             if date:
-                query = query.filter(MinuteKline.datetime >= datetime.combine(date, datetime.min.time()))
-                query = query.filter(MinuteKline.datetime < datetime.combine(date, datetime.max.time()))
+                query = query.filter(
+                    MinuteKline.datetime >= datetime.combine(date, datetime.min.time())
+                )
+                query = query.filter(
+                    MinuteKline.datetime < datetime.combine(date, datetime.max.time())
+                )
             else:
                 if start_datetime:
                     query = query.filter(MinuteKline.datetime >= start_datetime)
@@ -240,18 +273,20 @@ class Database:
     def add_watchlist(self, stock_code: str, category: str = "默认") -> Watchlist:
         """添加自选股"""
         with self.get_session() as session:
-            existing = session.query(Watchlist).filter(Watchlist.stock_code == stock_code).first()
+            existing = (
+                session.query(Watchlist)
+                .filter(Watchlist.stock_code == stock_code)
+                .first()
+            )
             if existing:
                 return existing
 
-            max_order = session.query(Watchlist).filter(
-                Watchlist.category == category
-            ).count()
+            max_order = (
+                session.query(Watchlist).filter(Watchlist.category == category).count()
+            )
 
             watchlist = Watchlist(
-                stock_code=stock_code,
-                category=category,
-                sort_order=max_order
+                stock_code=stock_code, category=category, sort_order=max_order
             )
             session.add(watchlist)
             return watchlist
@@ -259,9 +294,11 @@ class Database:
     def remove_watchlist(self, stock_code: str) -> bool:
         """删除自选股"""
         with self.get_session() as session:
-            watchlist = session.query(Watchlist).filter(
-                Watchlist.stock_code == stock_code
-            ).first()
+            watchlist = (
+                session.query(Watchlist)
+                .filter(Watchlist.stock_code == stock_code)
+                .first()
+            )
             if watchlist:
                 session.delete(watchlist)
                 return True
@@ -280,9 +317,11 @@ class Database:
     def update_watchlist_category(self, stock_code: str, category: str) -> bool:
         """更新自选股分类"""
         with self.get_session() as session:
-            watchlist = session.query(Watchlist).filter(
-                Watchlist.stock_code == stock_code
-            ).first()
+            watchlist = (
+                session.query(Watchlist)
+                .filter(Watchlist.stock_code == stock_code)
+                .first()
+            )
             if watchlist:
                 watchlist.category = category
                 return True
@@ -309,12 +348,17 @@ class Database:
     def get_latest_daily_kline_date(self, stock_code: str) -> Optional[date]:
         """获取某股票最新日 K 线日期"""
         with self.get_session() as session:
-            kline = session.query(DailyKline).filter(
-                DailyKline.stock_code == stock_code
-            ).order_by(DailyKline.date.desc()).first()
+            kline = (
+                session.query(DailyKline)
+                .filter(DailyKline.stock_code == stock_code)
+                .order_by(DailyKline.date.desc())
+                .first()
+            )
             return kline.date if kline else None
 
-    def get_latest_minute_kline_datetime(self, stock_code: str, trade_date: date = None) -> Optional[datetime]:
+    def get_latest_minute_kline_datetime(
+        self, stock_code: str, trade_date: date = None
+    ) -> Optional[datetime]:
         """获取某股票最新分钟 K 线时间"""
         with self.get_session() as session:
             query = session.query(MinuteKline).filter(
@@ -322,7 +366,8 @@ class Database:
             )
             if trade_date:
                 query = query.filter(
-                    MinuteKline.datetime >= datetime.combine(trade_date, datetime.min.time())
+                    MinuteKline.datetime
+                    >= datetime.combine(trade_date, datetime.min.time())
                 )
             kline = query.order_by(MinuteKline.datetime.desc()).first()
             return kline.datetime if kline else None

@@ -2,6 +2,7 @@
 股票数据获取层
 支持 baostock（主）和 akshare（备）
 """
+
 import logging
 from datetime import datetime, date, timedelta
 from typing import List, Optional, Dict, Any
@@ -64,6 +65,7 @@ class StockFetcher:
             return df
 
         df = self._retry_call(_fetch)
+        logger.info(f"akshare stock_zh_a_spot_em columns: {df.columns.tolist()}")
 
         stocks = []
         for _, row in df.iterrows():
@@ -71,17 +73,30 @@ class StockFetcher:
                 code = str(row.get("代码", ""))
                 name = str(row.get("名称", ""))
                 if code and name and code.startswith(("0", "3", "6")):
-                    stocks.append({
-                        "code": code,
-                        "name": name,
-                        "industry": str(row.get("行业", "")) if pd.notna(row.get("行业")) else None,
-                        "market_cap": float(row.get("总市值", 0)) if pd.notna(row.get("总市值")) else None
-                    })
+                    market_cap_raw = row.get("总市值")
+                    market_cap = None
+                    if market_cap_raw is not None and pd.notna(market_cap_raw):
+                        try:
+                            market_cap = float(market_cap_raw)
+                        except:
+                            pass
+                    stocks.append(
+                        {
+                            "code": code,
+                            "name": name,
+                            "industry": str(row.get("行业", ""))
+                            if pd.notna(row.get("行业"))
+                            else None,
+                            "market_cap": market_cap,
+                        }
+                    )
             except Exception as e:
                 logger.debug(f"Skipping row: {e}")
                 continue
 
-        logger.info(f"Fetched {len(stocks)} stocks")
+        logger.info(
+            f"Fetched {len(stocks)} stocks, sample market_cap: {[s.get('market_cap') for s in stocks[:5]]}"
+        )
         return stocks
 
     def save_stock_list(self) -> int:
@@ -100,7 +115,9 @@ class StockFetcher:
         try:
             info = self._bao.fetch_stock_info(stock_code)
             if info:
-                return StockInfo(**info)
+                result = StockInfo(**info)
+                self._populate_realtime_quote(result, stock_code)
+                return result
         except Exception as e:
             logger.warning(f"BaoStock failed for {stock_code}: {e}")
 
@@ -128,27 +145,57 @@ class StockFetcher:
             if not info.name:
                 stock = self.db.get_stock(stock_code)
                 if stock:
-                    info.name = stock.name
-                    info.industry = stock.industry
-                    info.market_cap = stock.market_cap
+                    info.name = stock["name"]
+                    info.industry = stock["industry"]
+                    info.market_cap = stock["market_cap"]
 
+            self._populate_realtime_quote(info, stock_code)
             return info
         except Exception as e:
             logger.error(f"Failed to fetch info for {stock_code}: {e}")
             return None
+
+    def _populate_realtime_quote(self, info: StockInfo, stock_code: str):
+        """填充实时行情数据"""
+        try:
+            df = ak.stock_zh_a_hist_em(
+                symbol=stock_code,
+                period="daily",
+                start_date=(date.today() - timedelta(days=5)).strftime("%Y%m%d"),
+                end_date=date.today().strftime("%Y%m%d"),
+                adjust="qfq",
+            )
+            if df is not None and len(df) > 0:
+                last = df.iloc[-1]
+                info.open = float(last["开盘"])
+                info.high = float(last["最高"])
+                info.low = float(last["最低"])
+                info.close = float(last["收盘"])
+                info.volume = int(last["成交量"])
+                if "成交额" in df.columns:
+                    info.amount = int(last["成交额"])
+                if len(df) >= 2:
+                    prev_close = float(df.iloc[-2]["收盘"])
+                    if prev_close > 0:
+                        info.price_change = info.close - prev_close
+                        info.change_percent = (info.price_change / prev_close) * 100
+        except Exception as e:
+            logger.warning(f"Failed to fetch realtime quote for {stock_code}: {e}")
 
     def fetch_daily_klines(
         self,
         stock_code: str,
         start_date: str = None,
         end_date: str = None,
-        adjust: str = "qfq"
+        adjust: str = "qfq",
     ) -> List[Dict]:
         """获取日 K 线数据"""
         logger.info(f"Fetching daily klines for {stock_code}")
 
         try:
-            return self._bao.fetch_daily_klines(stock_code, start_date, end_date, adjust)
+            return self._bao.fetch_daily_klines(
+                stock_code, start_date, end_date, adjust
+            )
         except Exception as e:
             logger.warning(f"BaoStock failed for daily klines: {e}")
 
@@ -163,25 +210,46 @@ class StockFetcher:
                 period="daily",
                 start_date=start_date,
                 end_date=end_date,
-                adjust=adjust
+                adjust=adjust,
             )
             return df
 
         try:
             df = self._retry_call(_fetch)
+            logger.info(f"akshare columns: {df.columns.tolist()}")
+
+            turnover_col = None
+            for col in df.columns:
+                if "换手" in str(col):
+                    turnover_col = col
+                    logger.info(f"Found turnover column: {turnover_col}")
+                    break
 
             klines = []
             for _, row in df.iterrows():
-                klines.append({
-                    "stock_code": stock_code,
-                    "date": pd.to_datetime(row["日期"]).date(),
-                    "open": float(row["开盘"]),
-                    "high": float(row["最高"]),
-                    "low": float(row["最低"]),
-                    "close": float(row["收盘"]),
-                    "volume": int(row["成交量"]),
-                    "amount": int(row["成交额"]) if "成交额" in row else 0
-                })
+                turnover = None
+                if turnover_col and turnover_col in row:
+                    try:
+                        turnover = (
+                            float(row[turnover_col])
+                            if pd.notna(row[turnover_col])
+                            else None
+                        )
+                    except:
+                        pass
+                klines.append(
+                    {
+                        "stock_code": stock_code,
+                        "date": pd.to_datetime(row["日期"]).date(),
+                        "open": float(row["开盘"]),
+                        "high": float(row["最高"]),
+                        "low": float(row["最低"]),
+                        "close": float(row["收盘"]),
+                        "volume": int(row["成交量"]),
+                        "amount": int(row["成交额"]) if "成交额" in row else 0,
+                        "turnover": turnover,
+                    }
+                )
 
             logger.info(f"Fetched {len(klines)} daily klines for {stock_code}")
             return klines
@@ -194,7 +262,7 @@ class StockFetcher:
         stock_code: str,
         start_date: str = None,
         end_date: str = None,
-        adjust: str = "qfq"
+        adjust: str = "qfq",
     ) -> int:
         """获取并保存日 K 线数据"""
         klines = self.fetch_daily_klines(stock_code, start_date, end_date, adjust)
@@ -208,7 +276,7 @@ class StockFetcher:
         start_date: str = None,
         end_date: str = None,
         period: str = "1",
-        adjust: str = "qfq"
+        adjust: str = "qfq",
     ) -> List[Dict]:
         """获取分钟 K 线数据
 
@@ -222,7 +290,9 @@ class StockFetcher:
         logger.info(f"Fetching {period}min klines for {stock_code}")
 
         try:
-            return self._bao.fetch_minute_klines(stock_code, start_date, end_date, period)
+            return self._bao.fetch_minute_klines(
+                stock_code, start_date, end_date, period
+            )
         except Exception as e:
             logger.warning(f"BaoStock failed for minute klines: {e}")
 
@@ -237,7 +307,7 @@ class StockFetcher:
                 period=period,
                 start_date=start_date,
                 end_date=end_date,
-                adjust=adjust
+                adjust=adjust,
             )
             return df
 
@@ -247,16 +317,22 @@ class StockFetcher:
             klines = []
             for _, row in df.iterrows():
                 try:
-                    klines.append({
-                        "stock_code": stock_code,
-                        "datetime": pd.to_datetime(row["时间"]),
-                        "open": float(row["开盘"]),
-                        "high": float(row["最高"]),
-                        "low": float(row["最低"]),
-                        "close": float(row["收盘"]),
-                        "volume": int(row["成交量"]) if pd.notna(row["成交量"]) else 0,
-                        "amount": int(row["成交额"]) if "成交额" in row and pd.notna(row["成交额"]) else 0
-                    })
+                    klines.append(
+                        {
+                            "stock_code": stock_code,
+                            "datetime": pd.to_datetime(row["时间"]),
+                            "open": float(row["开盘"]),
+                            "high": float(row["最高"]),
+                            "low": float(row["最低"]),
+                            "close": float(row["收盘"]),
+                            "volume": int(row["成交量"])
+                            if pd.notna(row["成交量"])
+                            else 0,
+                            "amount": int(row["成交额"])
+                            if "成交额" in row and pd.notna(row["成交额"])
+                            else 0,
+                        }
+                    )
                 except Exception as e:
                     logger.debug(f"Skipping kline row: {e}")
                     continue
@@ -273,10 +349,12 @@ class StockFetcher:
         start_date: str = None,
         end_date: str = None,
         period: str = "1",
-        adjust: str = "qfq"
+        adjust: str = "qfq",
     ) -> int:
         """获取并保存分钟 K 线数据"""
-        klines = self.fetch_minute_klines(stock_code, start_date, end_date, period, adjust)
+        klines = self.fetch_minute_klines(
+            stock_code, start_date, end_date, period, adjust
+        )
         if klines:
             return self.db.save_minute_klines(klines)
         return 0
@@ -288,25 +366,29 @@ class StockFetcher:
         try:
             info = self._bao.fetch_stock_info(stock_code)
             if info:
-                klines = self._bao.fetch_daily_klines(stock_code, 
-                    start_date=(date.today() - timedelta(days=1)).strftime('%Y-%m-%d'),
-                    end_date=date.today().strftime('%Y-%m-%d'))
+                klines = self._bao.fetch_daily_klines(
+                    stock_code,
+                    start_date=(date.today() - timedelta(days=1)).strftime("%Y-%m-%d"),
+                    end_date=date.today().strftime("%Y-%m-%d"),
+                )
                 if klines:
                     latest = klines[-1]
                     prev = klines[-2] if len(klines) > 1 else latest
-                    change = latest['close'] - prev['close']
-                    change_percent = (change / prev['close'] * 100) if prev['close'] else 0
+                    change = latest["close"] - prev["close"]
+                    change_percent = (
+                        (change / prev["close"] * 100) if prev["close"] else 0
+                    )
                     return {
                         "code": stock_code,
-                        "name": info.get('name', ''),
-                        "open": latest['open'],
-                        "high": latest['high'],
-                        "low": latest['low'],
-                        "close": latest['close'],
-                        "volume": latest['volume'],
-                        "amount": latest['amount'],
+                        "name": info.get("name", ""),
+                        "open": latest["open"],
+                        "high": latest["high"],
+                        "low": latest["low"],
+                        "close": latest["close"],
+                        "volume": latest["volume"],
+                        "amount": latest["amount"],
                         "price_change": change,
-                        "change_percent": change_percent
+                        "change_percent": change_percent,
                     }
         except Exception as e:
             logger.warning(f"BaoStock failed for realtime quote: {e}")
@@ -332,7 +414,9 @@ class StockFetcher:
                 "volume": int(row["成交量"]) if pd.notna(row["成交量"]) else 0,
                 "amount": int(row["成交额"]) if pd.notna(row["成交额"]) else 0,
                 "price_change": float(row["涨跌额"]) if pd.notna(row["涨跌额"]) else 0,
-                "change_percent": float(row["涨跌幅"]) if pd.notna(row["涨跌幅"]) else 0,
+                "change_percent": float(row["涨跌幅"])
+                if pd.notna(row["涨跌幅"])
+                else 0,
             }
         except Exception as e:
             logger.error(f"Failed to fetch realtime quote for {stock_code}: {e}")
@@ -342,18 +426,14 @@ class StockFetcher:
         self,
         stock_codes: List[str] = None,
         include_daily: bool = True,
-        include_minute: bool = False
+        include_minute: bool = False,
     ) -> Dict:
         """批量更新股票数据"""
         if stock_codes is None:
             stocks = self.db.get_all_stocks()
             stock_codes = [s.code for s in stocks]
 
-        results = {
-            "success": 0,
-            "failed": 0,
-            "errors": []
-        }
+        results = {"success": 0, "failed": 0, "errors": []}
 
         def update_single(code: str):
             try:
@@ -366,7 +446,9 @@ class StockFetcher:
                 return code, False, str(e)
 
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(update_single, code): code for code in stock_codes}
+            futures = {
+                executor.submit(update_single, code): code for code in stock_codes
+            }
             for future in as_completed(futures):
                 code, success, error = future.result()
                 if success:
@@ -378,9 +460,7 @@ class StockFetcher:
         return results
 
     def update_stock_with_latest_data(
-        self,
-        stock_code: str,
-        include_minute: bool = True
+        self, stock_code: str, include_minute: bool = True
     ) -> bool:
         """更新单只股票最新数据"""
         try:

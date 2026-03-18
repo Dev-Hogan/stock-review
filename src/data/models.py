@@ -1,10 +1,21 @@
 """
 数据模型定义
 """
+
 from datetime import datetime, date
 from typing import Optional
 from dataclasses import dataclass
-from sqlalchemy import Column, String, Integer, BigInteger, DateTime, Date, Numeric, Text, Index
+from sqlalchemy import (
+    Column,
+    String,
+    Integer,
+    BigInteger,
+    DateTime,
+    Date,
+    Numeric,
+    Text,
+    Index,
+)
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -13,6 +24,7 @@ Base = declarative_base()
 @dataclass
 class Stock(Base):
     """股票基本信息"""
+
     __tablename__ = "stocks"
 
     code: str = Column(String(10), primary_key=True)
@@ -25,6 +37,7 @@ class Stock(Base):
 @dataclass
 class DailyKline(Base):
     """日 K 线数据"""
+
     __tablename__ = "daily_klines"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
@@ -36,6 +49,7 @@ class DailyKline(Base):
     close: float = Column(Numeric(10, 2), nullable=False)
     volume: int = Column(BigInteger, nullable=False)
     amount: int = Column(BigInteger, nullable=False)
+    turnover: Optional[float] = Column(Numeric(10, 4))
 
     __table_args__ = (
         Index("idx_daily_klines_stock_date", "stock_code", "date", unique=True),
@@ -46,6 +60,7 @@ class DailyKline(Base):
 @dataclass
 class MinuteKline(Base):
     """分钟 K 线数据（用于回放）"""
+
     __tablename__ = "minute_klines"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
@@ -59,7 +74,9 @@ class MinuteKline(Base):
     amount: int = Column(BigInteger, nullable=False)
 
     __table_args__ = (
-        Index("idx_minute_klines_stock_datetime", "stock_code", "datetime", unique=True),
+        Index(
+            "idx_minute_klines_stock_datetime", "stock_code", "datetime", unique=True
+        ),
         Index("idx_minute_klines_datetime", "datetime"),
     )
 
@@ -67,6 +84,7 @@ class MinuteKline(Base):
 @dataclass
 class Watchlist(Base):
     """自选股"""
+
     __tablename__ = "watchlists"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
@@ -78,6 +96,7 @@ class Watchlist(Base):
 @dataclass
 class Config(Base):
     """配置表"""
+
     __tablename__ = "configs"
 
     key: str = Column(String(100), primary_key=True)
@@ -88,6 +107,7 @@ class Config(Base):
 @dataclass
 class KlineRequest:
     """K 线数据请求参数"""
+
     stock_code: str
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -97,6 +117,7 @@ class KlineRequest:
 @dataclass
 class StockInfo:
     """股票信息响应"""
+
     code: str
     name: str
     industry: Optional[str] = None

@@ -1,7 +1,8 @@
 """
 数据查询相关路由
 """
-from datetime import datetime, date
+
+from datetime import datetime, date, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -41,6 +42,7 @@ class DailyKlineResponse(BaseModel):
     close: float
     volume: int
     amount: int
+    turnover: Optional[float] = None
 
 
 class MinuteKlineResponse(BaseModel):
@@ -67,21 +69,71 @@ class RealtimeQuoteResponse(BaseModel):
     change_percent: float
 
 
-@router.get("/stocks/search", response_model=List[StockInfoResponse])
+def _format_date(d):
+    """确保日期格式为 yyyy-mm-dd"""
+    if hasattr(d, "isoformat"):
+        return d.isoformat()
+    if isinstance(d, str):
+        if len(d) == 8 and d.isdigit():
+            return f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+        return d
+    return str(d)
+
+
+@router.get("/stocks/search")
 async def search_stocks(
-    keyword: str = Query(..., min_length=1, description="搜索关键词"),
-    limit: int = Query(20, ge=1, le=100)
+    keyword: str = Query("", description="搜索关键词"),
+    limit: int = Query(20, ge=1, le=100),
 ):
     """搜索股票"""
+    if not keyword:
+        return []
     stocks = db.search_stocks(keyword, limit)
     return [
-        StockInfoResponse(
-            code=s["code"],
-            name=s["name"],
-            industry=s.get("industry"),
-            market_cap=s.get("market_cap")
-        )
+        {
+            "code": s["code"],
+            "name": s["name"],
+            "industry": s.get("industry"),
+            "market_cap": s.get("market_cap"),
+        }
         for s in stocks
+    ]
+
+
+@router.get("/stocks/{code}/daily", response_model=List[DailyKlineResponse])
+async def get_daily_klines(
+    code: str,
+    start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD"),
+    limit: int = Query(250, ge=1, le=1000),
+):
+    """获取日K线数据"""
+    start = datetime.strptime(start_date, "%Y%m%d").date() if start_date else None
+    end = datetime.strptime(end_date, "%Y%m%d").date() if end_date else None
+
+    db_klines = db.get_daily_klines(code, start, end, limit)
+
+    if not db_klines:
+        klines = fetcher.fetch_daily_klines(code, start_date, end_date)
+        if klines:
+            db.save_daily_klines(klines)
+            db_klines = db.get_daily_klines(code, start, end, limit)
+
+    if not db_klines:
+        return []
+
+    return [
+        DailyKlineResponse(
+            stock_code=k["stock_code"],
+            date=_format_date(k["date"]),
+            open=float(k["open"]),
+            high=float(k["high"]),
+            low=float(k["low"]),
+            close=float(k["close"]),
+            volume=k["volume"],
+            amount=k["amount"],
+        )
+        for k in db_klines
     ]
 
 
@@ -98,10 +150,10 @@ async def get_stock_info(code: str):
         if not stock:
             raise HTTPException(status_code=404, detail="Stock not found")
         return StockInfoResponse(
-            code=stock.code,
-            name=stock.name,
-            industry=stock.industry,
-            market_cap=stock.market_cap
+            code=stock["code"],
+            name=stock["name"],
+            industry=stock["industry"],
+            market_cap=stock["market_cap"],
         )
 
     result = StockInfoResponse(
@@ -116,7 +168,7 @@ async def get_stock_info(code: str):
         volume=info.volume,
         amount=info.amount,
         price_change=info.price_change,
-        change_percent=info.change_percent
+        change_percent=info.change_percent,
     )
 
     cache.set_stock_info(code, result.model_dump())
@@ -128,7 +180,8 @@ async def get_daily_klines(
     code: str,
     start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
     end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD"),
-    limit: int = Query(250, ge=1, le=1000)
+    limit: int = Query(250, ge=1, le=1000),
+    refresh: bool = Query(False, description="强制从网络刷新"),
 ):
     """获取日K线数据"""
     start = datetime.strptime(start_date, "%Y%m%d").date() if start_date else None
@@ -136,38 +189,46 @@ async def get_daily_klines(
 
     db_klines = db.get_daily_klines(code, start, end, limit)
 
-    if not db_klines:
+    if not db_klines or refresh:
         klines = fetcher.fetch_daily_klines(code, start_date, end_date)
         if klines:
-            db.save_daily_klines(klines)
-            return [
+            if not db_klines:
+                db.save_daily_klines(klines)
+            result = [
                 DailyKlineResponse(
                     stock_code=k["stock_code"],
-                    date=k["date"].isoformat(),
-                    open=k["open"],
-                    high=k["high"],
-                    low=k["low"],
-                    close=k["close"],
+                    date=_format_date(k["date"]),
+                    open=float(k["open"]),
+                    high=float(k["high"]),
+                    low=float(k["low"]),
+                    close=float(k["close"]),
                     volume=k["volume"],
-                    amount=k["amount"]
+                    amount=k["amount"],
+                    turnover=k.get("turnover"),
                 )
                 for k in klines
             ]
-        return []
+            return result
+        if db_klines:
+            pass
+        else:
+            return []
 
-    return [
+    result = [
         DailyKlineResponse(
             stock_code=k["stock_code"],
-            date=k["date"].isoformat() if hasattr(k["date"], 'isoformat') else str(k["date"]),
+            date=_format_date(k["date"]),
             open=float(k["open"]),
             high=float(k["high"]),
             low=float(k["low"]),
             close=float(k["close"]),
             volume=k["volume"],
-            amount=k["amount"]
+            amount=k["amount"],
+            turnover=k.get("turnover"),
         )
         for k in db_klines
     ]
+    return result
 
 
 @router.get("/stocks/{code}/minute", response_model=List[MinuteKlineResponse])
@@ -176,7 +237,7 @@ async def get_minute_klines(
     date: Optional[str] = Query(None, description="交易日期 YYYYMMDD"),
     period: str = Query("1", description="周期 1/5/15/30/60"),
     start_datetime: Optional[str] = Query(None, description="开始时间"),
-    end_datetime: Optional[str] = Query(None, description="结束时间")
+    end_datetime: Optional[str] = Query(None, description="结束时间"),
 ):
     """获取分钟K线数据"""
     trade_date = datetime.strptime(date, "%Y%m%d").date() if date else None
@@ -201,7 +262,7 @@ async def get_minute_klines(
                     low=k["low"],
                     close=k["close"],
                     volume=k["volume"],
-                    amount=k["amount"]
+                    amount=k["amount"],
                 )
                 for k in klines
             ]
@@ -216,7 +277,7 @@ async def get_minute_klines(
             low=float(k.low),
             close=float(k.close),
             volume=k.volume,
-            amount=k.amount
+            amount=k.amount,
         )
         for k in db_klines
     ]
@@ -249,13 +310,10 @@ async def refresh_stock_list():
         if "ProxyError" in error_msg or "Unable to connect" in error_msg:
             raise HTTPException(
                 status_code=503,
-                detail="网络连接失败：无法访问外部数据源，请检查网络代理配置"
+                detail="网络连接失败：无法访问外部数据源，请检查网络代理配置",
             )
         if "timeout" in error_msg.lower():
-            raise HTTPException(
-                status_code=504,
-                detail="请求超时，请稍后重试"
-            )
+            raise HTTPException(status_code=504, detail="请求超时，请稍后重试")
         raise HTTPException(status_code=500, detail=error_msg)
 
 

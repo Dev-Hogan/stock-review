@@ -24,6 +24,7 @@ export interface DailyKline {
   close: number
   volume: number
   amount: number
+  turnover?: number
 }
 
 export interface MinuteKline {

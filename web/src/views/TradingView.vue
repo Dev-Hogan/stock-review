@@ -47,6 +47,65 @@
 
           <div class="chart-container">
             <div ref="chartRef" class="kline-chart"></div>
+            <div v-if="tooltipData" class="kline-tooltip">
+              <div class="tooltip-date">{{ tooltipData.date }}</div>
+              <div class="tooltip-row">
+                <span>开盘</span>
+                <span>{{ tooltipData.open?.toFixed(2) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>开盘涨幅</span>
+                <span :class="tooltipData.openChange >= 0 ? 'up' : 'down'">{{ tooltipData.openChange >= 0 ? '+' : '' }}{{ tooltipData.openChange?.toFixed(2) }}%</span>
+              </div>
+              <div class="tooltip-row">
+                <span>最高</span>
+                <span class="up">{{ tooltipData.high?.toFixed(2) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>最低</span>
+                <span class="down">{{ tooltipData.low?.toFixed(2) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>收盘</span>
+                <span>{{ tooltipData.close?.toFixed(2) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>涨幅</span>
+                <span :class="tooltipData.changePercent >= 0 ? 'up' : 'down'">{{ tooltipData.changePercent >= 0 ? '+' : '' }}{{ tooltipData.changePercent?.toFixed(2) }}%</span>
+              </div>
+              <div class="tooltip-row">
+                <span>振幅</span>
+                <span>{{ tooltipData.amplitude?.toFixed(2) }}%</span>
+              </div>
+              <div class="tooltip-row">
+                <span>成交量</span>
+                <span>{{ formatVolume(tooltipData.volume) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>成交额</span>
+                <span>{{ formatAmount(tooltipData.amount) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>换手</span>
+                <span>{{ tooltipData.turnover ? tooltipData.turnover.toFixed(2) + '%' : '-' }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>市值</span>
+                <span>{{ formatAmount(tooltipData.marketCap) }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>MA5</span>
+                <span>{{ tooltipData.ma5?.toFixed(2) || '-' }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>MA10</span>
+                <span>{{ tooltipData.ma10?.toFixed(2) || '-' }}</span>
+              </div>
+              <div class="tooltip-row">
+                <span>MA20</span>
+                <span>{{ tooltipData.ma20?.toFixed(2) || '-' }}</span>
+              </div>
+            </div>
           </div>
 
           <div class="chart-controls">
@@ -67,7 +126,7 @@
 
       <aside class="right-panel">
         <div class="panel-section">
-          <h3>实时行情</h3>
+          <h3>实时行情（暂不需要开发）</h3>
           <div v-if="selectedStock" class="quote-details">
             <div class="quote-row header-row">
               <span class="stock-name-lg">{{ selectedStock.name }}</span>
@@ -119,8 +178,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
-import { createChart, type IChartApi } from 'lightweight-charts'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { createChart, type IChartApi, type ISeriesApi } from 'lightweight-charts'
 import StockSearch from '@/components/StockSearch.vue'
 import WatchList from '@/components/WatchList.vue'
 import { stockApi, type StockInfo } from '@/api/stock'
@@ -132,7 +191,14 @@ const watchlistStocks = ref<StockInfo[]>([])
 const selectedStock = ref<StockInfo | null>(null)
 const chartRef = ref<HTMLElement | null>(null)
 const refreshing = ref(false)
+const tooltipData = ref<any>(null)
 let chart: IChartApi | null = null
+let resizeObserver: ResizeObserver | null = null
+let candlestickSeries: ISeriesApi<'Candlestick'> | null = null
+let ma5Series: ISeriesApi<'Line'> | null = null
+let ma10Series: ISeriesApi<'Line'> | null = null
+let ma20Series: ISeriesApi<'Line'> | null = null
+let klineDataStore: any[] = []
 
 const periods = [
   { label: '日K', value: 'daily' },
@@ -147,6 +213,17 @@ const currentPeriod = ref('daily')
 onMounted(() => {
   loadWatchlist()
   initChart()
+})
+
+onUnmounted(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (chart) {
+    chart.remove()
+    chart = null
+  }
 })
 
 async function refreshStockList() {
@@ -187,9 +264,12 @@ async function loadWatchlistStocks() {
 
 function initChart() {
   if (!chartRef.value) return
+  if (chart) {
+    chart.remove()
+  }
   chart = createChart(chartRef.value, {
     width: chartRef.value.clientWidth,
-    height: 400,
+    height: chartRef.value.clientHeight || 400,
     layout: {
       background: { color: '#ffffff' },
       textColor: '#333'
@@ -197,8 +277,19 @@ function initChart() {
     grid: {
       vertLines: { color: '#f0f0f0' },
       horzLines: { color: '#f0f0f0' }
+    },
+    timeScale: {
+      borderColor: '#e0e0e0',
+      timeVisible: false
     }
   })
+
+  resizeObserver = new ResizeObserver(() => {
+    if (chart && chartRef.value) {
+      chart.resize(chartRef.value.clientWidth, chartRef.value.clientHeight)
+    }
+  })
+  resizeObserver.observe(chartRef.value)
 }
 
 function calculateMA(data: any[], period: number): { time: any; value: number }[] {
@@ -216,6 +307,15 @@ function calculateMA(data: any[], period: number): { time: any; value: number }[
   return result
 }
 
+function calculateMAAt(data: any[], idx: number, period: number): number | null {
+  if (idx < period - 1) return null
+  let sum = 0
+  for (let j = 0; j < period; j++) {
+    sum += data[idx - j].close
+  }
+  return parseFloat((sum / period).toFixed(2))
+}
+
 async function loadKlineData() {
   if (!selectedStock.value || !chartRef.value) return
 
@@ -224,54 +324,65 @@ async function loadKlineData() {
 
   if (currentPeriod.value === 'daily') {
     const res = await stockApi.getDailyKlines(code, { limit: 250 })
-    klineData = res.data
-      .map(k => ({
-        time: k.date as any,
+    const seen = new Set()
+    klineData = []
+    for (const k of res.data) {
+      const dateStr = String(k.date).slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue
+      if (seen.has(dateStr)) continue
+      seen.add(dateStr)
+      klineData.push({
+        time: dateStr,
         open: k.open,
         high: k.high,
         low: k.low,
-        close: k.close
-      }))
-      .sort((a, b) => a.time.localeCompare(b.time))
+        close: k.close,
+        volume: k.volume,
+        amount: k.amount,
+        turnover: k.turnover,
+        date: dateStr
+      })
+    }
+    klineData.sort((a, b) => a.time.localeCompare(b.time))
+    klineDataStore = [...klineData]
   } else {
     const res = await stockApi.getMinuteKlines(code, { period: currentPeriod.value })
     klineData = res.data
       .map(k => ({
-        time: k.datetime.replace('T', ' ').slice(0, 16) as any,
+        time: String(k.datetime).replace('T', ' ').slice(0, 16),
         open: k.open,
         high: k.high,
         low: k.low,
-        close: k.close
+        close: k.close,
+        volume: k.volume,
+        amount: k.amount,
+        date: String(k.datetime).slice(0, 16)
       }))
       .sort((a, b) => a.time.localeCompare(b.time))
+    klineDataStore = [...klineData]
   }
 
-  if (chart) {
-    chart.remove()
-    chart = null
+  if (!chart || !chartRef.value) {
+    initChart()
   }
-  if (!chartRef.value) return
+  if (!chart) return
 
-  const containerWidth = chartRef.value.clientWidth || 800
+  const containerWidth = chartRef.value.clientWidth
   const containerHeight = chartRef.value.clientHeight || 500
+  chart.resize(containerWidth, containerHeight)
 
-  chart = createChart(chartRef.value, {
-    width: containerWidth,
-    height: containerHeight,
-    layout: {
-      background: { color: '#ffffff' },
-      textColor: '#333333'
-    },
-    grid: {
-      vertLines: { color: '#f0f0f0' },
-      horzLines: { color: '#f0f0f0' }
-    },
-    timeScale: {
-      borderColor: '#e0e0e0'
-    }
-  })
+  chart.timeScale().resetTimeScale()
 
-  const candlestickSeries = chart.addCandlestickSeries({
+  if (candlestickSeries) chart.removeSeries(candlestickSeries)
+  if (ma5Series) chart.removeSeries(ma5Series)
+  if (ma10Series) chart.removeSeries(ma10Series)
+  if (ma20Series) chart.removeSeries(ma20Series)
+
+  const ma5 = calculateMA(klineData, 5)
+  const ma10 = calculateMA(klineData, 10)
+  const ma20 = calculateMA(klineData, 20)
+
+  candlestickSeries = chart.addCandlestickSeries({
     upColor: '#ef5350',
     downColor: '#26a69a',
     borderUpColor: '#ef5350',
@@ -281,29 +392,72 @@ async function loadKlineData() {
   })
   candlestickSeries.setData(klineData)
 
-  const ma5 = calculateMA(klineData, 5)
-  const ma10 = calculateMA(klineData, 10)
-  const ma20 = calculateMA(klineData, 20)
-
-  chart.addLineSeries({
+  ma5Series = chart.addLineSeries({
     color: '#2196f3',
     lineWidth: 1,
     title: 'MA5'
-  }).setData(ma5)
+  })
+  ma5Series.setData(ma5)
 
-  chart.addLineSeries({
+  ma10Series = chart.addLineSeries({
     color: '#ff9800',
     lineWidth: 1,
     title: 'MA10'
-  }).setData(ma10)
+  })
+  ma10Series.setData(ma10)
 
-  chart.addLineSeries({
+  ma20Series = chart.addLineSeries({
     color: '#9c27b0',
     lineWidth: 1,
     title: 'MA20'
-  }).setData(ma20)
+  })
+  ma20Series.setData(ma20)
 
   chart.timeScale().fitContent()
+  chart.timeScale().scrollToRealTime()
+
+  chart.subscribeCrosshairMove((param) => {
+    if (!param.time || !param.seriesData.size) {
+      tooltipData.value = null
+      return
+    }
+    
+    const candleData = param.seriesData.get(candlestickSeries!)
+    if (!candleData || !('open' in candleData)) {
+      tooltipData.value = null
+      return
+    }
+
+    const data = candleData as any
+    const currentTime = typeof param.time === 'string' ? param.time : String(param.time)
+    const idx = klineDataStore.findIndex(k => k.time === currentTime)
+    const prevKline = idx > 0 ? klineDataStore[idx - 1] : null
+    const prevClose = prevKline ? prevKline.close : data.close
+    
+    const change = prevClose > 0 ? data.close - prevClose : 0
+    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0
+    const openChange = prevClose > 0 ? ((data.open - prevClose) / prevClose) * 100 : 0
+    const amplitude = prevClose > 0 ? ((data.high - data.low) / prevClose) * 100 : 0
+    
+    tooltipData.value = {
+      date: currentTime,
+      open: data.open,
+      high: data.high,
+      low: data.low,
+      close: data.close,
+      volume: idx >= 0 ? klineDataStore[idx].volume : 0,
+      amount: idx >= 0 ? klineDataStore[idx].amount : 0,
+      turnover: idx >= 0 ? klineDataStore[idx].turnover : null,
+      change: change,
+      changePercent: changePercent,
+      openChange: openChange,
+      amplitude: amplitude,
+      marketCap: selectedStock.value?.market_cap,
+      ma5: idx >= 4 ? calculateMAAt(klineDataStore, idx, 5) : null,
+      ma10: idx >= 9 ? calculateMAAt(klineDataStore, idx, 10) : null,
+      ma20: idx >= 19 ? calculateMAAt(klineDataStore, idx, 20) : null
+    }
+  })
 }
 
 async function onSelectStock(code: string) {
@@ -469,12 +623,57 @@ function formatAmount(a: number | undefined) {
   height: 500px;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .kline-chart {
   width: 100%;
   flex: 1;
   min-height: 500px;
+}
+
+.kline-tooltip {
+  position: absolute;
+  top: 10px;
+  left: 70px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  z-index: 100;
+  pointer-events: none;
+  min-width: 180px;
+}
+
+.kline-tooltip .tooltip-date {
+  font-weight: bold;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #444;
+}
+
+.kline-tooltip .tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+
+.kline-tooltip .tooltip-row span:first-child {
+  color: #999;
+  margin-right: 12px;
+}
+
+.kline-tooltip .tooltip-row span:last-child {
+  font-weight: 500;
+}
+
+.kline-tooltip .up {
+  color: #f56c6c;
+}
+
+.kline-tooltip .down {
+  color: #67c23a;
 }
 
 .chart-controls {

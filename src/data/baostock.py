@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 class BaoStockFetcher:
     """baostock 数据获取器"""
 
-    def __init__(self):
+    def __init__(self, timeout: int = 1800):
         self._logged_in = False
+        self._timeout = timeout
 
     def _ensure_login(self):
         """确保已登录"""
         if not self._logged_in:
-            bs.login()
+            bs.login(timeout=self._timeout)
             self._logged_in = True
 
     def _logout(self):

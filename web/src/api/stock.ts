@@ -79,7 +79,7 @@ export const stockApi = {
   },
 
   refreshList() {
-    return api.post('/data/stocks/refresh-list')
+    return api.post('/data/stocks/refresh-list', null, { timeout: 600000 })
   },
 
   updateStock(code: string, includeMinute = true) {

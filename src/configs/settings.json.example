@@ -1,0 +1,30 @@
+{
+  "llm": {
+    "provider": "custom",
+    "ollama": {
+      "base_url": "http://localhost:11434",
+      "model": "qwen2.5:7b"
+    },
+    "openai": {
+      "api_key": "",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini"
+    },
+    "deepseek": {
+      "api_key": "",
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-chat"
+    },
+    "custom": {
+      "name": "自定义",
+      "api_key": "",
+      "base_url": "",
+      "model": "",
+      "chat_path": "/chat/completions"
+    }
+  },
+  "data": {
+    "update_time": "22:00",
+    "history_days": 365
+  }
+}

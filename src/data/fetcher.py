@@ -28,6 +28,20 @@ class StockFetcher:
         self.db = db or Database()
         self._bao = BaoStockFetcher()
 
+    def _retry_call(self, func, *args, **kwargs) -> Any:
+        """带重试的函数调用"""
+        last_error = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self.RETRY_DELAY)
+        logger.error(f"All {self.MAX_RETRIES} attempts failed")
+        raise last_error
+
     def _try_bao(self, func, *args, **kwargs):
         """尝试使用 baostock"""
         try:
